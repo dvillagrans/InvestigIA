@@ -1,0 +1,760 @@
+\documentclass[12pt, a4paper]{article}
+
+% === Paquetes ===
+\usepackage{fontspec}
+\usepackage{polyglossia}
+\setmainlanguage{spanish}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{amsmath}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds}
+
+% === Configuración ===
+\geometry{margin=2.5cm}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black!70!blue,
+    urlcolor=black!70!blue,
+    citecolor=black!70!blue
+}
+
+\definecolor{accent}{RGB}{30, 90, 160}
+\definecolor{codebg}{RGB}{248, 248, 248}
+\definecolor{codegreen}{RGB}{40, 120, 60}
+
+\titleformat{\section}
+  {\Large\bfseries\color{accent}}{\thesection}{1em}{}
+\titleformat{\subsection}
+  {\large\bfseries\color{accent!80!black}}{\thesubsection}{1em}{}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\textcolor{accent}{InvestigIA -- Diseño de integración}}
+\fancyhead[R]{\small\textcolor{accent}{\thepage}}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\lstdefinestyle{python}{
+    language=Python,
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{accent}\bfseries,
+    commentstyle=\color{codegreen},
+    stringstyle=\color{red!60!black},
+    breaklines=true,
+    frame=single,
+    framerule=0.3pt,
+    rulecolor=\color{black!30},
+    xleftmargin=0.5cm,
+    numbers=left,
+    numberstyle=\tiny\color{black!40},
+    numbersep=8pt,
+    showstringspaces=false,
+    tabsize=4
+}
+
+\lstdefinestyle{json}{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    breaklines=true,
+    frame=single,
+    framerule=0.3pt,
+    rulecolor=\color{black!30},
+    xleftmargin=0.5cm,
+    showstringspaces=false
+}
+
+% === Documento ===
+\begin{document}
+
+% --- Título ---
+\begin{center}
+    {\LARGE\bfseries Diseño de integración}\\[0.3em]
+    {\LARGE\bfseries de Gentle-AI en InvestigIA}\\[1.5em]
+    {\normalsize
+    Adaptación de Engram, Skills, Contratos y Flujo SDD}\\
+    {\normalsize al ecosistema multiagente de InvestigIA}\\[1em]
+    Centro de Investigación en Computación, IPN\\[0.5em]
+    {\normalsize \today}
+\end{center}
+
+\vspace{2em}
+
+% ======================================================================
+\section{Introducción}
+% ======================================================================
+
+InvestigIA transforma un perfil de estudiante de posgrado en un protocolo
+preliminar de investigación mediante seis agentes especializados: perfilado,
+matching, metodológico, investigador, redacción y revisión. El notebook del
+proyecto establece que cada agente debe cumplir con contrato de datos, prompt
+versionado, máximo de iteraciones, manejo de errores, logging y pruebas.
+
+El problema es que esos requisitos quedan enunciados pero no diseñados. ¿Qué
+pasa exactamente cuando el agente de perfil genera un JSON incompleto? ¿Cómo
+sabe el agente de redacción qué evidencia recuperó el investigador? ¿Con qué
+criterio se decide si el protocolo final es suficiente o necesita otra ronda
+de correcciones?
+
+Este documento propone una respuesta concreta tomando los conceptos de
+Gentle-AI (memoria persistente, flujo estructurado con validación, instrucciones
+especializadas por contexto) y adaptándolos a la arquitectura que ya define
+InvestigIA. No se trata de instalar Gentle-AI como dependencia externa, sino
+de implementar las mismas ideas directamente en el código del proyecto.
+
+% ======================================================================
+\section{Flujo multiagente con puertas de validación}
+% ======================================================================
+
+El pipeline de InvestigIA no debería ser lineal. Si el agente de perfil
+genera un JSON con la lista de intereses vacía, no tiene sentido pasar eso
+al agente de matching. Lo razonable es validar la salida de cada agente
+antes de permitirle avanzar al siguiente.
+
+A esas validaciones les llamamos puertas. Cada puerta $V_i$ revisa que la
+salida de un agente cumpla un contrato mínimo antes de pasarla al siguiente
+nodo del flujo.
+
+\begin{figure}[H]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tikzpicture}[
+    node distance=0.9cm and 1cm,
+    agent/.style={
+        rectangle, rounded corners=3pt, minimum width=2cm, minimum height=0.85cm,
+        draw=accent, thick, fill=accent!8, font=\footnotesize\bfseries, text=accent
+    },
+    gate/.style={
+        diamond, aspect=1.8, minimum width=0.9cm, minimum height=0.7cm,
+        draw=orange!70!black, thick, fill=orange!10, font=\scriptsize\bfseries, text=orange!70!black
+    },
+    input/.style={
+        ellipse, minimum width=1.6cm, minimum height=0.7cm,
+        draw=gray, thick, fill=gray!10, font=\footnotesize
+    },
+    outcome/.style={
+        rectangle, rounded corners=2pt, minimum width=1.5cm, minimum height=0.6cm,
+        draw=codegreen!60!black, thick, fill=codegreen!10, font=\footnotesize, text=codegreen!40!black
+    },
+    arrow/.style={-{Stealth[length=4pt]}, thick, draw=black!60},
+    failarrow/.style={-{Stealth[length=4pt]}, thick, draw=red!50, dashed},
+]
+
+% Fila 1: izquierda a derecha
+\node[input] (est) {Estudiante};
+\node[agent, right=0.5cm of est] (perf) {Perfil};
+\node[gate, right=0.4cm of perf] (v1) {$V_1$};
+\node[agent, right=0.4cm of v1] (match) {Matching};
+\node[gate, right=0.4cm of match] (v2) {$V_2$};
+\node[agent, right=0.4cm of v2] (met) {Metodológico};
+
+% Fila 2: derecha a izquierda (serpentina)
+\node[agent, below=1.4cm of met] (inv) {Investigador};
+\node[gate, left=0.4cm of inv] (v3) {$V_3$};
+\node[agent, left=0.4cm of v3] (red) {Redacción};
+\node[gate, left=0.4cm of red] (v4) {$V_4$};
+\node[agent, left=0.4cm of v4] (rev) {Revisión};
+\node[gate, left=0.4cm of rev] (v5) {$V_5$};
+\node[outcome, left=0.5cm of v5] (ok) {Entrega};
+
+% Flechas principales
+\draw[arrow] (est) -- (perf);
+\draw[arrow] (perf) -- (v1);
+\draw[arrow] (v1) -- (match);
+\draw[arrow] (match) -- (v2);
+\draw[arrow] (v2) -- (met);
+\draw[arrow] (met) -- (inv);
+\draw[arrow] (inv) -- (v3);
+\draw[arrow] (v3) -- (red);
+\draw[arrow] (red) -- (v4);
+\draw[arrow] (v4) -- (rev);
+\draw[arrow] (rev) -- (v5);
+\draw[arrow] (v5) -- (ok);
+
+% Flechas de reintento (fila 1)
+\draw[failarrow] (v1.south) -- ++(0,-0.35) -| ([xshift=-0.2cm]perf.south);
+\node[font=\scriptsize, text=red!60!black, below=0.2cm of v1, anchor=north] {reintenta};
+
+\draw[failarrow] (v2.south) -- ++(0,-0.35) -- ++(-0.8,0) |- ([xshift=-0.2cm]match.south);
+\node[font=\scriptsize, text=red!60!black, below=0.2cm of v2, anchor=north] {reintenta};
+
+% Flechas de reintento (fila 2)
+\draw[failarrow] (v3.north) -- ++(0,0.35) -| ([xshift=0.2cm]inv.north);
+\node[font=\scriptsize, text=red!60!black, above=0.2cm of v3, anchor=south] {reintenta};
+
+\draw[failarrow] (v4.north) -- ++(0,0.35) -- ++(0.8,0) |- ([xshift=0.2cm]red.north);
+\node[font=\scriptsize, text=red!60!black, above=0.2cm of v4, anchor=south] {reintenta};
+
+\draw[failarrow] (v5.south) -- ++(0,-0.35) -| ([xshift=-0.2cm]rev.south);
+\node[font=\scriptsize, text=red!60!black, below=0.2cm of v5, anchor=north] {itera};
+
+% Etiquetas de las puertas
+\node[font=\scriptsize, text=black!50, below=0.05cm of v1] {contrato};
+\node[font=\scriptsize, text=black!50, below=0.05cm of v2] {contrato};
+\node[font=\scriptsize, text=black!50, above=0.05cm of v3] {metadatos};
+\node[font=\scriptsize, text=black!50, above=0.05cm of v4] {evidencia};
+\node[font=\scriptsize, text=black!50, below=0.05cm of v5] {coherencia};
+
+\end{tikzpicture}
+}
+\caption{Pipeline multiagente con puertas de validación y caminos de reintento}
+\label{fig:pipeline}
+\end{figure}
+
+Las reglas de cada puerta:
+
+\begin{description}[style=nextline, leftmargin=2.5cm]
+    \item[$V_1$: Perfil $\to$ Matching]
+    El perfil JSON debe tener nombre no vacío, nivel académico válido
+    (licenciatura, maestria o doctorado), y al menos un interés. Si falta
+    cualquiera de estos campos, el agente de perfil vuelve a preguntarle
+    al estudiante.
+
+    \item[$V_2$: Matching $\to$ Metodológico]
+    El ranking debe contener al menos un resultado con score mayor a cero.
+    Un matching vacío significa que los intereses del estudiante no
+    coinciden con ninguna línea o asesor disponible; en ese caso se le
+    pide que amplíe o reformule.
+
+    \item[$V_3$: Metodológico $\to$ Investigador]
+    El esquema de investigación necesita pregunta de investigación, al
+    menos un objetivo específico y una estrategia metodológica explícita.
+    Si el agente metodológico no logra definir alguno de estos elementos,
+    itera con las observaciones que resulten del intento fallido.
+
+    \item[$V_4$: Investigador $\to$ Redacción]
+    Cada fragmento recuperado debe incluir identificador, título, autores,
+    año y texto. Los fragmentos que no cumplan se descartan. Si después
+    del filtrado no queda ninguno, la evidencia se marca como
+    insuficiente y el agente de redacción lo recibe como input explícito.
+
+    \item[$V_5$: Revisión $\to$ Entrega]
+    El agente de revisión evalúa el protocolo contra reglas deterministas
+    y genera un puntaje de coherencia entre 0 y 1. Si el puntaje cae por
+    debajo del umbral (0.7 en la primera implementación), el protocolo
+    regresa a redacción junto con las observaciones específicas. Si pasa,
+    se entrega al estudiante.
+\end{description}
+
+La idea de las puertas viene del concepto de verificación en SDD: cada fase
+debe confirmarse antes de avanzar. En un sistema multiagente esto es
+particularmente útil porque un error en un nodo temprano se propaga a todos
+los posteriores.
+
+% ======================================================================
+\section{Engram como capa de estado persistente}
+% ======================================================================
+
+Gentle-AI usa Engram para guardar decisiones de arquitectura entre sesiones
+de coding. En InvestigIA el concepto se adapta para algo distinto: mantener
+el estado completo de la interacción con el estudiante.
+
+La diferencia es sutil pero importante. En Gentle-AI, Engram guarda
+decisiones que tomó el desarrollador. En InvestigIA, Engram guarda el
+resultado del trabajo que produjeron los agentes para un estudiante
+específico.
+
+\newpage
+\subsection{Qué se persiste}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}p{3.5cm}p{4cm}p{5.5cm}@{}}
+\toprule
+\textbf{Dato} & \textbf{Topic key} & \textbf{Quién lo escribe} \\
+\midrule
+Perfil del estudiante & \texttt{session/{id}/perfil} & Agente de Perfil \\
+\addlinespace
+Líneas seleccionadas & \texttt{session/{id}/matching} & Agente de Matching \\
+\addlinespace
+Esquema de investigación & \texttt{session/{id}/esquema} & Agente Metodológico \\
+\addlinespace
+Evidencia recuperada & \texttt{session/{id}/evidencia} & Agente Investigador \\
+\addlinespace
+Protocolo generado & \texttt{session/{id}/protocolo} & Agente de Redacción \\
+\addlinespace
+Reporte de revisión & \texttt{session/{id}/revision} & Agente de Revisión \\
+\addlinespace
+Historial de iteraciones & \texttt{session/{id}/iteraciones} & Orquestador \\
+\bottomrule
+\end{tabular}
+\caption{Estructura de persistencia en Engram}
+\end{table}
+
+\subsection{Para qué sirve}
+
+Recuperación de sesión. Si el estudiante cierra la aplicación a la mitad
+del proceso y regresa horas después, el sistema retoma exactamente donde
+quedó. El perfil, la evidencia ya recuperada, el esquema metodológico,
+todo sigue ahí. Sin esta persistencia, cada sesión empieza de cero.
+
+Contexto entre agentes. Cuando el agente de redacción necesita generar el
+protocolo, consulta directamente en Engram la evidencia recuperada y el
+esquema metodológico. El orquestador no tiene que pasar toda esa
+información como parámetro en cada llamada. Los agentes leen lo que
+necesitan de la capa de estado compartido.
+
+Auditoría. Cada iteración queda registrada con timestamp y resultado.
+Si el agente de revisión rechaza el protocolo tres veces seguidas, el
+historial permite analizar qué cambió entre cada intento. ¿Mejoró la
+redacción? ¿Se agregaron fuentes? ¿O el agente simplemente repite los
+mismos errores?
+
+Métricas. El conteo de iteraciones por agente responde directamente a la
+pregunta de investigación PI-5. Si el agente metodológico necesita en
+promedio 2.3 iteraciones para producir un esquema válido, mientras que
+el de perfil pasa en 1.1, eso indica dónde el sistema tiene más
+dificultades y qué componentes aportan menos valor del esperado.
+
+\newpage
+\subsection{Modelo de datos}
+
+Cada observación en Engram sigue esta estructura:
+
+\begin{lstlisting}[style=json]
+{
+  "topic_key": "session/abc123/perfil",
+  "type": "state",
+  "content": {
+    "nombre": "María López",
+    "nivel": "maestria",
+    "intereses": ["robótica", "visión por computadora"],
+    "experiencia": "proyecto de detección de objetos",
+    "timestamp": "2026-06-17T10:30:00Z"
+  },
+  "session_id": "abc123"
+}
+\end{lstlisting}
+
+% ======================================================================
+\section{Skills por agente}
+% ======================================================================
+
+En Gentle-AI, un skill es un conjunto de instrucciones que el agente de
+coding carga cuando el contexto de trabajo lo requiere. En InvestigIA se
+aplica la misma idea, pero las instrucciones definen el comportamiento de
+cada agente del sistema.
+
+Los skills no son prompts. El prompt es lo que se envía al LLM en cada
+llamada. El skill es la capa encima: las reglas, validaciones y patrones
+que el agente debe seguir independientemente del prompt específico que
+reciba en una iteración determinada.
+
+\subsection{Agente de Perfil}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{perfil/estructura}]
+    Define el esquema JSON del perfil con sus campos obligatorios y
+    opcionales. La validación se hace con Pydantic: intereses mínimo 1
+    elemento, nombre no vacío, nivel restringido a tres valores posibles.
+
+    \item[\texttt{perfil/preguntas-adaptativas}]
+    Lógica para generar preguntas de seguimiento cuando el perfil está
+    incompleto. Si el estudiante no menciona experiencia previa, el
+    agente pregunta directamente por eso. Si los intereses son demasiado
+    amplios (``inteligencia artificial'' sin más), pide que delimite.
+\end{description}
+
+\subsection{Agente de Matching}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{matching/scoring}]
+    La función de puntuación del notebook: $S(a_i, s) = w_1 I_i + w_2
+    E_i + w_3 H_i + w_4 D_i$. Los pesos $w_j$ son configurables y deben
+    sumar 1. En la PoC se puede empezar con pesos iguales (0.25 cada uno)
+    y ajustar según los resultados de los casos de prueba.
+
+    \item[\texttt{matching/explainability}]
+    Cada resultado del ranking incluye una explicación textual. El
+    estudiante necesita saber \emph{por qué} un asesor es candidato, no
+    solo que aparece primero en la lista. Sin explicación, el matching es
+    una caja negra.
+\end{description}
+
+\subsection{Agente Metodológico}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{metodologico/delimitacion}]
+    Flujo guiado para construir el esquema de investigación: problema,
+    alcance, pregunta, objetivos (general y específicos), hipótesis.
+    Cada sección tiene sus propias reglas de validación interna.
+
+    \item[\texttt{metodologico/coherencia-interna}]
+    Reglas deterministas que se evalúan antes de pasar al siguiente
+    agente. La pregunta de investigación debe conectarse con el objetivo
+    general. Los objetivos específicos deben ser alcanzables con la
+    metodología propuesta. La hipótesis, si existe, debe ser testeable.
+\end{description}
+
+\subsection{Agente Investigador (RAG)}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{investigador/retrieval}]
+    Pipeline de recuperación: a partir del esquema de investigación se
+    genera una consulta expandida, se calcula similitud coseno sobre los
+    embeddings del corpus, y se recuperan los 5 fragmentos más relevantes.
+    Cada fragmento conserva sus metadatos completos.
+
+    \item[\texttt{investigador/metadatos}]
+    Validación estricta de metadatos. Identificador, título, autores,
+    año y texto son obligatorios. Un fragmento sin autores o con año
+    vacío se descarta sin excepción. Si todos se descartan, la evidencia
+    se marca como insuficiente.
+
+    \item[\texttt{investigador/citas}]
+    El agente no puede generar citas que no existan en los fragmentos
+    recuperados. Esta es probablemente la regla más importante del
+    sistema: si el LLM necesita apoyar una afirmación y no hay evidencia
+    disponible, debe marcarlo explícitamente como \texttt{[sin fuente]}
+    en lugar de inventar una referencia.
+\end{description}
+
+\subsection{Agente de Redacción}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{redaccion/protocolo}]
+    Plantilla del protocolo con sus secciones mínimas: pregunta,
+    objetivos, hipótesis, metodología, justificación, alcance,
+    resultados esperados. Cada sección se genera condicionada por la
+    evidencia que recuperó el agente investigador.
+
+    \item[\texttt{redaccion/separacion-evidencia}]
+    Cada afirmación del protocolo debe distinguir entre lo que proviene
+    de la evidencia recuperada y lo que el LLM generó por su cuenta. Las
+    afirmaciones sin fuente se marcan como \texttt{[sin fuente]}. El
+    estudiante y el asesor deben poder diferenciar a simple vista qué
+    tiene respaldo documental y qué no.
+\end{description}
+
+\subsection{Agente de Revisión}
+
+\begin{description}[style=nextline, leftmargin=3cm]
+    \item[\texttt{revision/reglas-deterministas}]
+    Lista de verificación automática: ¿la pregunta conecta con el
+    objetivo general? ¿Los objetivos específicos son medibles? ¿La
+    metodología es compatible con el tipo de estudio? ¿Las referencias
+    citadas existen en el corpus recuperado?
+
+    \item[\texttt{revision/puntaje}]
+    Genera un puntaje de coherencia entre 0 y 1. El umbral de aprobación
+    inicial es 0.7, aunque habría que calibrarlo con los casos de prueba
+    C1 a C6 del diseño experimental.
+
+    \item[\texttt{revision/iteracion}]
+    Máximo 3 intentos. Si después de tres revisiones el puntaje sigue
+    por debajo del umbral, se entrega el protocolo con las observaciones
+    pendientes y una nota indicando que requiere revisión humana. Es
+    preferible entregar algo imperfecto con las fallas documentadas que
+    entrar en un bucle infinito.
+\end{description}
+
+% ======================================================================
+\section{Contratos entre agentes}
+% ======================================================================
+
+Cada transición entre agentes tiene un contrato definido con Pydantic. La
+idea es simple: si la salida de un agente no cumple el contrato que espera
+el siguiente, el orquestador captura el error y itera en lugar de propagar
+datos inválidos por todo el pipeline.
+
+\subsection{Contrato del agente de perfil}
+
+\begin{lstlisting}[style=python]
+from pydantic import BaseModel, Field
+from typing import List
+from enum import Enum
+
+class NivelAcademico(str, Enum):
+    licenciatura = "licenciatura"
+    maestria = "maestria"
+    doctorado = "doctorado"
+
+class PerfilEstudiante(BaseModel):
+    nombre: str = Field(..., min_length=1)
+    nivel: NivelAcademico
+    intereses: List[str] = Field(..., min_items=1)
+    experiencia_previa: str | None = None
+    institucion: str | None = None
+\end{lstlisting}
+
+Cuando el LLM genera un JSON con \texttt{intereses: []}, Pydantic levanta
+un error de validación. El orquestador captura ese error, le pregunta al
+estudiante qué líneas de investigación le interesan, y vuelve a invocar
+el agente de perfil con la respuesta.
+
+\subsection{Contrato del agente investigador}
+
+\begin{lstlisting}[style=python]
+from pydantic import BaseModel, Field
+
+class FragmentoRecuperado(BaseModel):
+    id: str
+    titulo: str = Field(..., min_length=1)
+    autores: List[str] = Field(..., min_items=1)
+    anio: int = Field(..., ge=1900, le=2030)
+    texto: str = Field(..., min_length=50)
+    score: float = Field(..., ge=0.0, le=1.0)
+
+class EvidenciaRecuperada(BaseModel):
+    fragmentos: List[FragmentoRecuperado]
+    evidencia_insuficiente: bool = False
+
+    def tiene_evidencia_valida(self) -> bool:
+        return len(self.fragmentos) > 0
+\end{lstlisting}
+
+Los fragmentos sin autores o con año fuera de rango se descartan en la
+validación. Si no queda ninguno, \texttt{evidencia\_insuficiente} se marca
+como \texttt{True}. El agente de redacción recibe esa señal y, en lugar
+de inventar referencias, genera el protocolo indicando qué secciones
+carecen de respaldo documental.
+
+\subsection{Contrato de revisión}
+
+\begin{lstlisting}[style=python]
+from pydantic import BaseModel, Field
+from typing import List
+
+class Observacion(BaseModel):
+    seccion: str
+    tipo: str  # "error" | "warning" | "sugerencia"
+    descripcion: str
+
+class ReporteRevision(BaseModel):
+    puntaje_coherencia: float = Field(..., ge=0.0, le=1.0)
+    observaciones: List[Observacion]
+    aprobado: bool
+
+    @property
+    def necesita_iteracion(self) -> bool:
+        return not self.aprobado
+\end{lstlisting}
+
+El orquestador lee \texttt{necesita\_iteracion}. Cuando es \texttt{True},
+pasa las observaciones al agente de redacción como contexto adicional.
+El agente de redacción entonces sabe qué secciones fallaron y por qué,
+lo cual es más útil que simplemente volver a intentar sin información
+sobre el error anterior.
+
+% ======================================================================
+\section{Orquestación con LangGraph}
+% ======================================================================
+
+LangGraph modela el flujo como un grafo dirigido donde cada nodo es un
+agente y cada arista es una puerta de validación. Las aristas condicionales
+permiten que el grafo decida en tiempo de ejecución si avanza o itera.
+
+\begin{lstlisting}[style=python]
+from langgraph.graph import StateGraph
+
+# Estado compartido entre todos los nodos
+class EstadoInvestigIA(TypedDict):
+    perfil: PerfilEstudiante | None
+    matching: MatchingResultado | None
+    esquema: EsquemaInvestigacion | None
+    evidencia: EvidenciaRecuperada | None
+    protocolo: Protocolo | None
+    revision: ReporteRevision | None
+    iteraciones: dict  # conteo por agente
+
+# Grafo
+grafo = StateGraph(EstadoInvestigIA)
+
+grafo.add_node("perfil", agente_perfil)
+grafo.add_node("matching", agente_matching)
+grafo.add_node("metodologico", agente_metodologico)
+grafo.add_node("investigador", agente_investigador)
+grafo.add_node("redaccion", agente_redaccion)
+grafo.add_node("revision", agente_revision)
+
+# Aristas condicionales: validación
+grafo.add_conditional_edges(
+    "perfil",
+    validar_perfil,        # ¿cumple contrato?
+    {"ok": "matching", "retry": "perfil"}
+)
+grafo.add_conditional_edges(
+    "revision",
+    validar_protocolo,     # ¿puntaje >= 0.7?
+    {"ok": END, "retry": "redaccion"}
+)
+\end{lstlisting}
+
+Cada función de validación (como \texttt{validar\_perfil} o
+\texttt{validar\_protocolo}) evalúa el contrato Pydantic correspondiente
+y devuelve ``ok'' o ``retry''. El grafo no necesita lógica condicional
+escrita a mano; LangGraph se encarga del enrutamiento.
+
+\subsection{Límite de iteraciones}
+
+El notebook establece ``máximo de iteraciones'' como requisito de cada
+agente. La implementación propone 3 intentos como límite. Cuando un agente
+falla tres veces, el sistema registra las tres salidas y sus errores en
+Engram, marca esa etapa como \texttt{requiere\_intervencion\_humana}, y
+continúa con el siguiente agente si el flujo lo permite.
+
+Esto evita que el sistema se quede atascado en un bucle sin salida. En un
+sprint de 10 días, es prefericiente detectar dónde el LLM no puede solo
+y documentar la limitación, en vez de gastar tiempo ajustando prompts
+para un caso que tal vez requiera intervención humana de todas formas.
+
+% ======================================================================
+\section{Integración con LM Studio}
+% ======================================================================
+
+Los seis agentes se comunican con Gemma 4 a través de LM Studio usando
+la interfaz compatible con OpenAI. El cliente se instancia una vez y se
+comparte:
+
+\begin{lstlisting}[style=python]
+from openai import OpenAI
+import os
+
+cliente = OpenAI(
+    base_url=os.getenv("LLM_BASE_URL", "http://localhost:1234/v1"),
+    api_key=os.getenv("LLM_API_KEY", "lm-studio"),
+)
+
+def invocar_agente(
+    sistema: str,
+    usuario: str,
+    modelo: str = "gemma-4",
+    temperatura: float = 0.2,
+) -> str:
+    respuesta = cliente.chat.completions.create(
+        model=modelo,
+        temperature=temperatura,
+        messages=[
+            {"role": "system", "content": sistema},
+            {"role": "user", "content": usuario},
+        ],
+    )
+    return respuesta.choices[0].message.content
+\end{lstlisting}
+
+Cada skill define su propio prompt de sistema. La temperatura varía
+según la tarea: 0.1 o 0.2 para perfil y revisión, donde se busca
+determinismo; 0.4 o 0.6 para redacción, donde cierta variabilidad
+mejora la calidad del texto generado.
+
+% ======================================================================
+\section{Mapeo con las preguntas de investigación}
+% ======================================================================
+
+El diseño propuesto no es independiente de las preguntas de investigación
+del notebook. Cada componente responde a una o más preguntas de forma
+directa.
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{@{}p{1.5cm}p{5cm}p{5.5cm}@{}}
+\toprule
+\textbf{PI} & \textbf{Pregunta} & \textbf{Cómo se aborda} \\
+\midrule
+PI-1 & Multiagente transforma información no estructurada en protocolo & Flujo con 6 agentes y contratos Pydantic \\
+\addlinespace
+PI-2 & Trazabilidad bibliográfica con RAG local & Fragmentos con metadatos obligatorios, citas solo del corpus \\
+\addlinespace
+PI-3 & Latencias compatibles con interacción & Gemma 4 para todo excepto verificación \\
+\addlinespace
+PI-4 & Validaciones deterministas + LLM & Puertas $V_i$ con reglas Pydantic + revisión por LLM \\
+\addlinespace
+PI-5 & Qué componentes aportan más valor & Engram registra iteraciones por agente, se puede medir \\
+\bottomrule
+\end{tabular}
+\caption{Relación entre preguntas de investigación y diseño}
+\end{table}
+
+La pregunta PI-3 sobre latencias es la que menos se aborda en este
+documento. La asignación de Gemma 4 como modelo principal ayuda, pero
+las latencias reales dependen del hardware, la cuantización y el tamaño
+del corpus. Eso habría que medirlo en la PoC, no se puede resolver en
+el diseño.
+
+% ======================================================================
+\section{Limitaciones}
+% ======================================================================
+
+Gemma 4 y validación estricta. Los contratos Pydantic asumen que el LLM
+genera JSON válido. Un modelo cuantizado puede producir JSON malformado,
+especialmente en respuestas largas. La mitigación es combinar reintentos
+con un prompt de corrección y un parser tolerante que intente reparar
+errores menores (comas finales, comillas simples en vez de dobles).
+
+Dependencia de Engram. Si Engram no está disponible en el entorno de
+despliegue, el sistema necesita un fallback. La opción más simple es
+almacenamiento local: un archivo JSON por sesión en disco, o una tabla
+SQLite. Funciona, pero pierde la ventaja de la memoria compartida entre
+sesiones.
+
+Umbral de revisión. El puntaje 0.7 para aprobar el protocolo es una
+primera aproximación. Podría ser demasiado permisivo o demasiado
+estricto; no hay forma de saberlo sin ejecutar los casos de prueba C1
+a C6 y ver qué puntajes producen. Es un hiperparámetro que se calibra
+en la práctica.
+
+Costo de iteración. Cada intento adicional es una llamada extra a Gemma 4.
+Si un agente falla tres veces, eso son tres llamadas que no estaban en
+el flujo ideal. En el hardware institucional, cada llamada puede tomar
+entre 10 y 30 segundos dependiendo de la longitud del prompt. No es
+crítico, pero sí se nota en un sprint de 10 días.
+
+Skills como código. Los skills descritos aquí son descripciones
+conceptuales. Para que el orquestador los cargue dinámicamente, hay que
+implementarlos como archivos con un formato estándar (el mismo que usa
+Gentle-AI para sus skills). Esa implementación no está hecha todavía.
+
+% ======================================================================
+\section{Próximos pasos}
+% ======================================================================
+
+\begin{enumerate}[leftmargin=1.5em]
+    \item Definir los esquemas Pydantic completos para los 6 agentes.
+    \item Implementar el grafo LangGraph con las aristas condicionales.
+    \item Escribir los prompts de sistema de cada agente (primer versión).
+    \item Configurar Engram con la estructura de topic keys propuesta.
+    \item Probar con el caso C1 (estudiante con tema definido) del
+    diseño experimental.
+    \item Calibrar el umbral de revisión con los casos C1 a C6.
+\end{enumerate}
+
+% ======================================================================
+% Referencias
+% ======================================================================
+\newpage
+\begin{thebibliography}{9}
+
+\bibitem{investigia-notebook}
+Equipo InvestigIA,
+\textit{Plan de acción para el desarrollo de InvestigIA},
+Notebook Jupyter, CIC-IPN, 2026.
+
+\bibitem{gentle-ai}
+Gentleman Programming,
+\textit{Gentle-AI -- Ecosystem, Frameworks, Workflows for AI coding agents},
+\url{https://github.com/Gentleman-Programming/gentle-ai},
+2026.
+
+\bibitem{engram}
+Gentleman Programming,
+\textit{Engram Commands -- Gentle-AI},
+\url{https://github.com/Gentleman-Programming/gentle-ai/blob/main/docs/engram.md},
+2026.
+
+\bibitem{langgraph}
+LangChain,
+\textit{LangGraph -- Building agent state machines},
+\url{https://github.com/langchain-ai/langgraph},
+2025.
+
+\end{thebibliography}
+
+\end{document}
