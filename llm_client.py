@@ -46,9 +46,12 @@ from __future__ import annotations
 import os
 import time
 
+from dotenv import load_dotenv
 from openai import OpenAI, APIConnectionError, APITimeoutError
 
 from errores import ErrorAgente
+
+load_dotenv()
 
 
 _NOMBRE_AGENTE_CLIENTE = "llm_client"
