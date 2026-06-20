@@ -35,7 +35,16 @@ Debes responder EXCLUSIVAMENTE con un JSON válido con esta estructura:
 Reglas:
 - La pregunta debe ser clara, específica y acotada.
 - El objetivo general debe responder directamente a la pregunta.
-- Los objetivos específicos deben ser alcanzables y medibles (mínimo 2).
+- Los objetivos específicos deben formularse siguiendo la taxonomía de Bloom.
+  Usa verbos de acción correspondientes al nivel cognitivo adecuado:
+    * Recordar: listar, identificar, describir, nombrar.
+    * Comprender: explicar, resumir, interpretar, clasificar.
+    * Aplicar: implementar, usar, demostrar, resolver.
+    * Analizar: comparar, contrastar, examinar, distinguir.
+    * Evaluar: juzgar, criticar, justificar, defender.
+    * Crear: diseñar, construir, proponer, desarrollar.
+  Cada objetivo específico debe empezar con un verbo en infinitivo y ser medible.
+  Mínimo 2 objetivos específicos.
 - La hipótesis debe ser testeable.
 - No inventes información que no esté en el perfil o el matching.
 - No incluyas texto fuera del JSON.
