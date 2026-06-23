@@ -1,8 +1,8 @@
 """
 agente_redaccion.py — Dev D
 
-Agente de Redacción.
-Recibe EsquemaInvestigacion + EvidenciaRecuperada y produce Protocolo.
+Agente de Perfil Académico.
+Recibe el estado del agente investigador y manda salida a revision.
 """
 from orquestacion.estado import EstadoInvestigIA
 
