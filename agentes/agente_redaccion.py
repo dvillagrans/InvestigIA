@@ -46,7 +46,6 @@ Reglas:
 - No incluyas texto fuera del JSON.                                                                                                                                                        
 """  
 
-
 def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
     """
     Lee 'esquema' del estado que contiene EsquemaInvestigacion + EvidenciaRecuperada
@@ -107,8 +106,13 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
     except ErrorAgente:
         raise
 
-    try:
-        datos = json.loads(texto)
+    try:                                                                                                                                                                                       
+        if texto.startswith("```"):                                                                                                                                                          
+            texto = texto.split("```")[1]                                                                                                                                                    
+            if texto.startswith("json"):
+                texto = texto[4:]                                                                                                                                                              
+            texto = texto.strip()
+        datos = json.loads(texto)  
     except json.JSONDecodeError as error:
         raise ErrorAgente(
             _NOMBRE,
