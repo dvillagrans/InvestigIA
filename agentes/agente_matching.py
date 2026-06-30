@@ -10,17 +10,15 @@ Responsabilidad:
 - Escribir el resultado en estado["matching"].
 
 Version PoC:
-- No LLM.
-- Similitud lexica simple con coseno
-- Mantiene el ranking interpretable
-- Usa el contrato Pydantic definido en contratos.py
-
+- No usa LLM.
+- Usa similitud lexica con coseno.
+- Mantiene el ranking interpretable.
+- Usa el contrato Pydantic definido en contratos.py.
 """
 
 from __future__ import annotations
 
 import logging
-# Para quitar acentos
 import math
 import re
 import unicodedata
@@ -37,8 +35,8 @@ _NOMBRE_AGENTE: Final[str] = "matching"
 _VERSION_AGENTE: Final[str] = "matching-deterministico-v1"
 _MAX_ITERACIONES: Final[int] = 1
 
-# En esta PoC el contrato PerfilEstudiante solo contiene intereses
-# Por eso todo el peso se asigna a similitud de intereses
+# En esta PoC el contrato PerfilEstudiante solo contiene intereses.
+# Por eso el componente activo del score es la similitud de intereses.
 _PESOS: Final[dict[str, float]] = {
     "intereses": 1.0,
     "experiencia": 0.0,
@@ -50,13 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 def _validar_pesos(pesos: dict[str, float]) -> None:
-    """
-    Valida que los pesos del matching sean interpretables.
-
-    Reglas:
-    - Ningun peso puede ser negativo.
-    - La suma de pesos debe ser 1.
-    """
+    """Valida que los pesos sean no negativos y sumen 1."""
     if any(valor < 0 for valor in pesos.values()):
         raise ErrorAgente(
             _NOMBRE_AGENTE,
@@ -72,36 +64,25 @@ def _validar_pesos(pesos: dict[str, float]) -> None:
 
 
 def _normalizar_texto(texto: str) -> list[str]:
-    """
-    Convierte texto libre en tokens comparables.
-
-    Operaciones:
-    - Pasa a minusculas.
-    - Elimina acentos.
-    - Conserva solo palabras alfanumericas.
-    """
+    """Convierte texto libre en tokens comparables."""
     texto = texto.lower()
     texto = unicodedata.normalize("NFD", texto)
-    texto = "".join(caracter for caracter in texto if unicodedata.category(caracter) != "Mn")
+    texto = "".join(
+        caracter
+        for caracter in texto
+        if unicodedata.category(caracter) != "Mn"
+    )
 
     return re.findall(r"\b[a-z0-9]+\b", texto)
 
 
 def _vectorizar(texto: str) -> Counter[str]:
-    """
-    Representa un texto como conteo de palabras.
-    """
+    """Representa un texto como conteo de palabras."""
     return Counter(_normalizar_texto(texto))
 
 
 def _similitud_coseno(texto_a: str, texto_b: str) -> float:
-    """
-    Calcula similitud coseno entre dos textos usando conteo de palabras.
-
-    Regresa:
-    - 0.0 si alguno de los textos queda vacio.
-    - Un valor entre 0.0 y 1.0 cuando hay tokens comparables.
-    """
+    """Calcula similitud coseno entre dos textos vectorizados por conteo."""
     vector_a = _vectorizar(texto_a)
     vector_b = _vectorizar(texto_b)
 
@@ -110,7 +91,10 @@ def _similitud_coseno(texto_a: str, texto_b: str) -> float:
 
     vocabulario = set(vector_a) | set(vector_b)
 
-    producto_punto = sum(vector_a[palabra] * vector_b[palabra] for palabra in vocabulario)
+    producto_punto = sum(
+        vector_a[palabra] * vector_b[palabra]
+        for palabra in vocabulario
+    )
     norma_a = math.sqrt(sum(valor**2 for valor in vector_a.values()))
     norma_b = math.sqrt(sum(valor**2 for valor in vector_b.values()))
 
@@ -121,34 +105,25 @@ def _similitud_coseno(texto_a: str, texto_b: str) -> float:
 
 
 def _texto_perfil(perfil: PerfilEstudiante) -> str:
-    """
-    Construye el texto base del estudiante para comparar intereses.
-    De lista a texto plano. En la PoC no se usan experiencia, habilidades ni disponibilidad.
-    """
+    """Une los intereses del estudiante en un texto comparable."""
     return " ".join(perfil.intereses)
 
 
 def _texto_candidato(candidato: ResultadoMatching) -> str:
-    """
-    Construye el texto base del candidato.
-
-    En la PoC el fixture del investigador ya incluye la informacion relevante
-    dentro de su justificacion.
-    """
+    """Construye el texto comparable del candidato."""
     return f"{candidato.nombre} {candidato.justificacion}"
 
 
 def _calcular_score(perfil: PerfilEstudiante, candidato: ResultadoMatching) -> float:
     """
-    Calcula el score formal del matching.
+    Calcula el score de matching.
 
     Formula base:
         S(ai, s) = w1 Ii + w2 Ei + w3 Hi + w4 Di
 
-    En esta PoC:
-    - Ii se calcula con similitud coseno lexica.
-    - Ei, Hi y Di quedan en 0 porque PerfilEstudiante todavia no contiene
-      experiencia, habilidades ni disponibilidad.
+    En esta PoC, Ii se calcula con similitud coseno lexica. Los demas
+    componentes quedan en 0 porque el perfil aun no contiene experiencia,
+    habilidades ni disponibilidad.
     """
     texto_estudiante = _texto_perfil(perfil)
     texto_investigador = _texto_candidato(candidato)
@@ -170,26 +145,19 @@ def _construir_justificacion(
     candidato: ResultadoMatching,
     score: float,
 ) -> str:
-    """
-    Genera una justificacion breve y verificable para el resultado.
-    """
+    """Genera una justificacion breve para el resultado de matching."""
     intereses = ", ".join(perfil.intereses)
 
     return (
         f"El candidato se relaciona con los intereses declarados "
         f"({intereses}). El score {score} se calculo mediante similitud "
-        f"lexica entre el perfil del estudiante y la informacion disponible "
-        f"del candidato."
+        f"coseno lexica entre el perfil del estudiante y la informacion "
+        f"disponible del candidato."
     )
 
 
 def _obtener_catalogo() -> list[ResultadoMatching]:
-    """
-    Regresa el catalogo disponible para el happy path.
-
-    Por ahora se usa el investigador falso compartido en fixtures.py para
-    mantener consistencia con las pruebas aisladas y la integracion.
-    """
+    """Regresa el catalogo disponible para el happy path."""
     return [INVESTIGADOR_FALSO]
 
 
@@ -197,29 +165,24 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
     """
     Ejecuta el agente de Matching.
 
-    Parametros:
-        estado: EstadoInvestigIA con estado["perfil"] lleno.
+    Entrada:
+        estado["perfil"]
 
-    Regresa:
-        EstadoInvestigIA con estado["matching"] lleno.
-
-    Lanza:
-        ErrorAgente si falta el perfil, si el perfil no cumple contrato o
-        si no se puede construir un resultado valido.
+    Salida:
+        estado["matching"]
     """
     try:
         _validar_pesos(_PESOS)
 
         perfil = estado.get("perfil")
 
-        # Si no hay perfil, no se puede ejecutar el agente de Matching. Se lanza ErrorAgente para que la orquestacion pueda manejarlo.
+        # Validacion defensiva: evita que el grafo avance con estado mal armado.
         if perfil is None:
             raise ErrorAgente(
                 _NOMBRE_AGENTE,
                 "No se recibio estado['perfil']. El agente de Matching necesita un PerfilEstudiante.",
             )
 
-        # Valida que la entrada respete el contrato esperado.
         if not isinstance(perfil, PerfilEstudiante):
             raise ErrorAgente(
                 _NOMBRE_AGENTE,
@@ -235,7 +198,6 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
 
         resultados: list[ResultadoMatching] = []
 
-        # Calculo de score para cada candidato en el catalogo
         for candidato in _obtener_catalogo():
             score = _calcular_score(perfil, candidato)
 
@@ -247,7 +209,7 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
             )
 
             resultados.append(resultado)
-        # Ranking de resultados por score descendente (max a min)
+
         resultados.sort(key=lambda item: item.score, reverse=True)
 
         if not resultados:
@@ -256,7 +218,6 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
                 "El catalogo de candidatos esta vacio. No fue posible generar ranking.",
             )
 
-        # Salida formal del agente
         matching = MatchingResultado(resultados=resultados)
 
         nuevo_estado = dict(estado)
@@ -272,3 +233,4 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
             _NOMBRE_AGENTE,
             f"Fallo inesperado en el agente de Matching: {type(error).__name__}: {error}",
         )
+    
