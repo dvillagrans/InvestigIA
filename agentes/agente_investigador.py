@@ -11,27 +11,31 @@ en estado['evidencia'].
 """
 from __future__ import annotations
 
+import numpy as np
 
 from contratos import EvidenciaRecuperada
 from errores import ErrorAgente
 from fixtures import CORPUS_FALSO
 from orquestacion.estado import EstadoInvestigIA
 
-from sentence_transformers import SentenceTransformer
-import numpy as np                                                                                                                         
-
 _NOMBRE = "investigador"
-_MODELO = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
-_CORPUS_EMBEDDINGS = _MODELO.encode([doc.texto for doc in CORPUS_FALSO])
+_TOP_K = 5
+_UMBRAL_SCORE = 0.15
+
+_modelo = None
+_corpus_embeddings = None
+
+
+def _get_model():
+    global _modelo, _corpus_embeddings
+    if _modelo is None:
+        from sentence_transformers import SentenceTransformer
+        _modelo = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+        _corpus_embeddings = _modelo.encode([doc.texto for doc in CORPUS_FALSO])
+    return _modelo, _corpus_embeddings
 
 
 def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
-    """
-    Lee 'esquema' del estado, usa RAG para recuperar los fragmentos mas relevantes
-    del CORPUS_FALSO, y escribe el resultado en estado['evidencia']
-
-    Indica un error si el resultado es un None
-    """
     esquema = estado.get("esquema")
 
     if esquema is None:
@@ -39,14 +43,23 @@ def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
             _NOMBRE,
             "No hay un esquema en el estado. El agente metodologico se debe ejecutar primero.",
         )
-    
-    query_embedding = _MODELO.encode([esquema.pregunta])
-    similitudes = query_embedding @ _CORPUS_EMBEDDINGS.T
 
-    indices = np.argsort(similitudes[0])[::-1][:4]
-    fragmentos = [CORPUS_FALSO[i] for i in indices]
+    modelo, corpus_embeddings = _get_model()
+
+    query_embedding = modelo.encode([esquema.pregunta])
+    similitudes = query_embedding @ corpus_embeddings.T
+
+    indices = np.argsort(similitudes[0])[::-1]
+
+    fragmentos = []
+    for i in indices:
+        if similitudes[0][i] < _UMBRAL_SCORE:
+            break
+        fragmentos.append(CORPUS_FALSO[i])
+        if len(fragmentos) >= _TOP_K:
+            break
 
     resultado = dict(estado)
-    resultado["evidencia"] = EvidenciaRecuperada(fragmentos = fragmentos)
+    resultado["evidencia"] = EvidenciaRecuperada(fragmentos=fragmentos)
 
     return resultado
