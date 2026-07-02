@@ -15,7 +15,6 @@ from llm_client import invocar_agente
 from orquestacion.estado import EstadoInvestigIA
 
 _NOMBRE = "perfil"
-_CAMPO_ENTRADA = "entrada_usuario"
 
 _PROMPT_SISTEMA = """\
 Eres un asistente de perfilado academico. Extrae un perfil estructurado a
@@ -60,17 +59,17 @@ def _normalizar_entrada(entrada: Any) -> str:
 
     raise ErrorAgente(
         _NOMBRE,
-        f"El campo '{_CAMPO_ENTRADA}' debe contener texto libre o una lista "
-        "no vacia de respuestas del estudiante.",
+        "La entrada del estudiante debe contener texto libre o una lista "
+        "no vacia de respuestas.",
     )
 
 
-def ejecutar(estado: EstadoInvestigIA) -> EstadoInvestigIA:
-    """Genera ``estado['perfil']`` sin modificar los demas campos."""
-    # La entrada conversacional es transitoria y aun no forma parte del
-    # contrato TypedDict. En ejecucion, el estado sigue siendo un dict.
-    entrada = estado.get(_CAMPO_ENTRADA) # Clave transitoria para campo de entrada
-    texto_estudiante = _normalizar_entrada(entrada)
+def ejecutar(
+    estado: EstadoInvestigIA,
+    entrada_usuario: str | Sequence[str],
+) -> EstadoInvestigIA:
+    """Genera ``estado['perfil']`` a partir de una entrada externa al estado."""
+    texto_estudiante = _normalizar_entrada(entrada_usuario)
 
     texto = invocar_agente(
         agente=_NOMBRE,

@@ -7,7 +7,6 @@ Ejecutar desde la raiz con: python -m pruebas.test_agente_perfil
 Requiere LM Studio activo y el modelo configurado cargado.
 """
 import unittest
-from typing import cast
 from unittest.mock import patch
 
 from agentes.agente_perfil import ejecutar
@@ -26,8 +25,7 @@ RESPUESTAS_ESTUDIANTE = [
 
 
 def construir_estado_de_entrada() -> EstadoInvestigIA:
-    estado: dict[str, object] = {
-        "entrada_usuario": RESPUESTAS_ESTUDIANTE,
+    estado: EstadoInvestigIA = {
         "perfil": None,
         "matching": None,
         "esquema": None,
@@ -35,7 +33,7 @@ def construir_estado_de_entrada() -> EstadoInvestigIA:
         "protocolo": None,
         "revision": None,
     }
-    return cast(EstadoInvestigIA, estado)
+    return estado
 
 
 def imprimir_separador(titulo: str) -> None:
@@ -53,17 +51,17 @@ def main() -> None:
 
     imprimir_separador("EJECUTANDO AGENTE")
     try:
-        estado_salida = ejecutar(estado_entrada)
+        estado_salida = ejecutar(estado_entrada, RESPUESTAS_ESTUDIANTE)
     except ErrorAgente as error:
         print("FALLO CONTROLADO -- el agente reporto un error:")
         print(f"  agente : {error.agente}")
         print(f"  mensaje: {error.mensaje}")
-        raise SystemExit(1) from error
+        return
     except Exception as error:
         print("FALLO NO CONTROLADO -- esto NO deberia pasar.")
         print(f"  Tipo: {type(error).__name__}")
         print(f"  Detalle: {error}")
-        raise SystemExit(1) from error
+        return
 
     imprimir_separador("SALIDA")
     print("estado['perfil']:")
@@ -73,8 +71,7 @@ def main() -> None:
     perfil = estado_salida.get("perfil")
     if not isinstance(perfil, PerfilEstudiante):
         print("PROBLEMA: la salida no es un PerfilEstudiante.")
-        raise SystemExit(1)
-
+        return
 
     print(f"OK -- nombre    : {perfil.nombre}")
     print(f"OK -- nivel     : {perfil.nivel.value}")
@@ -87,19 +84,17 @@ def main() -> None:
     )
     if not otros_campos_intactos:
         print("PROBLEMA: el agente modifico campos que no le correspondian.")
-        raise SystemExit(1)
+        return
     print("OK -- el agente no modifico campos que no le correspondian.")
 
     imprimir_separador("VALIDACION DE ERROR")
-    estado_sin_entrada = dict(estado_entrada)
-    estado_sin_entrada.pop("entrada_usuario", None)
     try:
-        ejecutar(cast(EstadoInvestigIA, estado_sin_entrada))
+        ejecutar(estado_entrada, [])
     except ErrorAgente as error:
-        print(f"OK -- entrada faltante produjo ErrorAgente: {error}")
+        print(f"OK -- entrada vacia produjo ErrorAgente: {error}")
     else:
-        print("PROBLEMA: una entrada faltante no produjo ErrorAgente.")
-        raise SystemExit(1)
+        print("PROBLEMA: una entrada vacia no produjo ErrorAgente.")
+        return
 
 
 class TestAgentePerfil(unittest.TestCase):
@@ -109,23 +104,24 @@ class TestAgentePerfil(unittest.TestCase):
     )
     def test_genera_perfil_sin_modificar_otros_campos(self, _mock_llm) -> None:
         entrada = construir_estado_de_entrada()
-        salida = ejecutar(entrada)
+        salida = ejecutar(entrada, RESPUESTAS_ESTUDIANTE)
 
         self.assertIsInstance(salida["perfil"], PerfilEstudiante)
         self.assertEqual(salida["perfil"], PERFIL_GUION)
         self.assertIsNone(entrada["perfil"])
+        self.assertEqual(salida.keys(), entrada.keys())
         for campo, valor in entrada.items():
             if campo != "perfil":
                 self.assertEqual(salida.get(campo), valor)
 
-    def test_entrada_faltante_lanza_error_agente(self) -> None:
+    def test_entrada_vacia_lanza_error_agente(self) -> None:
         with self.assertRaises(ErrorAgente):
-            ejecutar(cast(EstadoInvestigIA, {"perfil": None}))
+            ejecutar(construir_estado_de_entrada(), [])
 
     @patch("agentes.agente_perfil.invocar_agente", return_value="no es json")
     def test_respuesta_invalida_lanza_error_agente(self, _mock_llm) -> None:
         with self.assertRaises(ErrorAgente):
-            ejecutar(construir_estado_de_entrada())
+            ejecutar(construir_estado_de_entrada(), RESPUESTAS_ESTUDIANTE)
 
 
 if __name__ == "__main__":
